@@ -1,0 +1,95 @@
+from fastapi import FastAPI, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from contextlib import asynccontextmanager
+from datetime import datetime
+
+from config.settings import get_settings
+from db.session import engine
+from db.models import Base
+from api.project_router import router as project_router
+from api.document_router import router as document_router
+from api.chat_router import router as chat_router
+from api.schemas import HealthResponse
+
+settings = get_settings()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager for startup and shutdown events."""
+    # Startup
+    print(">> Starting AI Brain application...")
+    print(f">> Database: {settings.database_url.split('@')[-1]}")  # Hide credentials
+    
+    # Create tables (for development - use Alembic in production)
+    # async with engine.begin() as conn:
+    #     await conn.run_sync(Base.metadata.create_all)
+    
+    yield
+    
+    # Shutdown
+    print(">> Shutting down AI Brain application...")
+    await engine.dispose()
+
+
+# Create FastAPI application
+app = FastAPI(
+    title=settings.app_name,
+    version=settings.app_version,
+    description="AI-powered document analysis system for real estate with RAG capabilities",
+    lifespan=lifespan,
+    debug=settings.debug
+)
+
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Register routers
+app.include_router(project_router, prefix=settings.api_v1_prefix)
+app.include_router(document_router, prefix=settings.api_v1_prefix)
+app.include_router(chat_router, prefix=settings.api_v1_prefix)
+
+# Mount UI static files (Sprint 4)
+app.mount("/ui", StaticFiles(directory="ui", html=True), name="ui")
+
+
+@app.get(
+    "/health",
+    response_model=HealthResponse,
+    status_code=status.HTTP_200_OK,
+    tags=["Health"]
+)
+async def health_check() -> HealthResponse:
+    """Health check endpoint."""
+    return HealthResponse(
+        status="healthy",
+        version=settings.app_version,
+        timestamp=datetime.utcnow()
+    )
+
+
+@app.get("/", tags=["Root"])
+async def root():
+    """Root endpoint."""
+    return {
+        "message": "AI Brain API - Real Estate Document Analysis",
+        "version": settings.app_version,
+        "docs": "/docs"
+    }
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=settings.debug
+    )

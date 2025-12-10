@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Brain - Real Estate Document Analysis</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body class="bg-gray-100">
+    <!-- Header -->
+    <header class="bg-blue-600 text-white p-4 shadow-md">
+        <h1 class="text-2xl font-bold">AI Brain - Real Estate Document Analysis</h1>
+        <p class="text-sm text-blue-100">Sprint 4: Developer Testing UI</p>
+    </header>
+
+    <!-- Main Container -->
+    <div class="container mx-auto p-4">
+        <div class="flex flex-col lg:flex-row gap-4">
+            
+            <!-- LEFT PANEL: Project & Documents -->
+            <div class="lg:w-1/2 space-y-4">
+                
+                <!-- Create Project -->
+                <div class="bg-white rounded-lg shadow p-4">
+                    <h2 class="text-xl font-semibold mb-4 text-gray-800">1. Create Project</h2>
+                    <div class="flex gap-2">
+                        <input 
+                            type="text" 
+                            id="projectName" 
+                            placeholder="Enter project name" 
+                            class="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                        <button 
+                            onclick="createProject()" 
+                            class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition"
+                        >
+                            Create
+                        </button>
+                    </div>
+                    <div id="projectCreateResult" class="mt-2 text-sm"></div>
+                </div>
+
+                <!-- Project Selector -->
+                <div class="bg-white rounded-lg shadow p-4">
+                    <h2 class="text-xl font-semibold mb-4 text-gray-800">2. Select Project</h2>
+                    <div class="flex gap-2">
+                        <select 
+                            id="projectSelect" 
+                            class="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            onchange="onProjectChange()"
+                        >
+                            <option value="">-- Select a project --</option>
+                        </select>
+                        <button 
+                            onclick="loadProjects()" 
+                            class="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition"
+                        >
+                            Refresh
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Document Upload -->
+                <div class="bg-white rounded-lg shadow p-4">
+                    <h2 class="text-xl font-semibold mb-4 text-gray-800">3. Upload Document</h2>
+                    <div class="space-y-2">
+                        <input 
+                            type="file" 
+                            id="fileInput" 
+                            accept=".pdf" 
+                            class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                        />
+                        <button 
+                            onclick="uploadDocument()" 
+                            class="w-full px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition"
+                        >
+                            Upload
+                        </button>
+                        <div id="uploadResult" class="text-sm"></div>
+                    </div>
+                </div>
+
+                <!-- Ingestion Status -->
+                <div class="bg-white rounded-lg shadow p-4">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-xl font-semibold text-gray-800">4. Ingestion Status</h2>
+                        <button 
+                            onclick="refreshStatus()" 
+                            class="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition"
+                        >
+                            Refresh Status
+                        </button>
+                    </div>
+                    <div id="ingestionStatus" class="text-sm text-gray-600">Select a project to view status</div>
+                </div>
+
+            </div>
+
+            <!-- RIGHT PANEL: Chat Console -->
+            <div class="lg:w-1/2 space-y-4">
+                
+                <!-- Chat Window -->
+                <div class="bg-white rounded-lg shadow p-4">
+                    <h2 class="text-xl font-semibold mb-4 text-gray-800">Chat Console</h2>
+                    
+                    <!-- Chat Messages -->
+                    <div id="chatMessages" class="h-64 overflow-y-auto border border-gray-200 rounded-md p-4 mb-4 bg-gray-50">
+                        <p class="text-gray-400 text-sm">Select a project and start chatting...</p>
+                    </div>
+
+                    <!-- Chat Input -->
+                    <div class="space-y-2">
+                        <textarea 
+                            id="chatInput" 
+                            placeholder="Type your question here..." 
+                            rows="3" 
+                            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        ></textarea>
+                        <button 
+                            onclick="sendChat()" 
+                            class="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition"
+                        >
+                            Send
+                        </button>
+                        <div id="chatLatency" class="text-xs text-gray-500"></div>
+                    </div>
+                </div>
+
+                <!-- RAG Sources -->
+                <div class="bg-white rounded-lg shadow p-4">
+                    <h2 class="text-xl font-semibold mb-4 text-gray-800">RAG Sources</h2>
+                    <div id="ragSources" class="space-y-2 text-sm">
+                        <p class="text-gray-400">No sources yet. Send a chat message to see retrieved chunks.</p>
+                    </div>
+                </div>
+
+            </div>
+
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
