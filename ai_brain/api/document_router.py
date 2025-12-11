@@ -9,6 +9,7 @@ from db.session import get_db_session
 from db.repositories.chunk_repository import ChunkRepository
 from db.repositories.embedding_metadata_repository import EmbeddingMetadataRepository
 from ingestion.ingestion_service import IngestionService
+from tasks.ingestion_tasks import ingest_document_async, get_task_status
 from api.schemas import (
     DocumentUploadResponse,
     IngestionStatusResponse,
@@ -76,28 +77,92 @@ async def upload_document(
     finally:
         file.file.close()
     
-    # Run ingestion pipeline
+    # Try async ingestion with Celery, fallback to sync if Redis unavailable
     try:
-        logger.info(f"Starting ingestion pipeline for {file.filename}")
-        ingestion_service = IngestionService(session)
-        result = await ingestion_service.ingest_document(
+        logger.info(f"Attempting async ingestion for {file.filename}")
+        
+        # Try to submit task to Celery queue
+        task = ingest_document_async.delay(
             project_id=project_id,
-            file_path=file_path,
+            file_path=str(file_path),
             filename=file.filename
         )
         
-        logger.info(f"Ingestion completed - Document ID: {result.get('document_id')}, Chunks: {result.get('chunks_created')}, Pages: {result.get('pages_processed')}")
-        return DocumentUploadResponse(**result)
-    
-    except Exception as e:
-        logger.error(f"Ingestion failed for {file.filename}: {e}", exc_info=True)
-        # Clean up file if ingestion fails
-        if file_path.exists():
-            file_path.unlink()
+        logger.info(f"Ingestion task queued - Task ID: {task.id}, File: {file.filename}")
         
+        # Return immediately with task ID (non-blocking)
+        return DocumentUploadResponse(
+            status="queued",
+            message=f"Document upload successful. Ingestion started asynchronously.",
+            document_id=None,  # Will be set when task completes
+            chunks_created=0,
+            embeddings_created=0,
+            task_id=task.id  # Client can poll this for progress
+        )
+    
+    except Exception as celery_error:
+        # Celery/Redis not available - fallback to synchronous ingestion
+        error_msg = (
+            "⚠️ WARNING: Async processing unavailable - Redis/Celery not running. "
+            "Using synchronous processing (slower). "
+            "To enable async: Install Redis and start Celery worker."
+        )
+        logger.warning(f"{error_msg} Error: {celery_error}")
+        
+        try:
+            logger.info(f"Starting synchronous ingestion for {file.filename}")
+            print(f"\n{error_msg}\n")  # Print to console for visibility
+            
+            ingestion_service = IngestionService(session)
+            result = await ingestion_service.ingest_document(
+                project_id=project_id,
+                file_path=file_path,
+                filename=file.filename
+            )
+            
+            logger.info(f"Synchronous ingestion completed - Document ID: {result.get('document_id')}")
+            
+            # Add warning message to response
+            result['message'] = f"{result.get('message', '')} (Note: Processed synchronously - Redis unavailable)"
+            return DocumentUploadResponse(**result)
+        
+        except Exception as ingestion_error:
+            logger.error(f"Synchronous ingestion failed for {file.filename}: {ingestion_error}", exc_info=True)
+            # Clean up file if ingestion fails
+            if file_path.exists():
+                file_path.unlink()
+            
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Ingestion failed: {str(ingestion_error)}"
+            )
+
+
+@router.get(
+    "/task/{task_id}/status",
+    summary="Get status of an ingestion task"
+)
+async def get_task_status_endpoint(task_id: str):
+    """
+    Get the current status of a Celery ingestion task.
+    
+    States:
+    - PENDING: Task is waiting in queue
+    - PROGRESS: Task is currently processing (includes progress info)
+    - SUCCESS: Task completed successfully
+    - FAILURE: Task failed permanently
+    - RETRY: Task is being retried
+    
+    Returns progress information if task is in PROGRESS state.
+    """
+    try:
+        status = get_task_status(task_id)
+        return status
+    except Exception as e:
+        logger.error(f"Failed to get task status for {task_id}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Ingestion failed: {str(e)}"
+            detail=f"Failed to get task status: {str(e)}"
         )
 
 
@@ -106,7 +171,7 @@ async def upload_document(
     response_model=IngestionStatusResponse,
     summary="Get ingestion status for a project"
 )
-async def get_ingestion_status(
+async def get_project_ingestion_status(
     project_id: int,
     session: AsyncSession = Depends(get_db_session)
 ) -> IngestionStatusResponse:

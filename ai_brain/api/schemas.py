@@ -24,12 +24,13 @@ class ProjectResponse(BaseModel):
 # Document Schemas
 class DocumentUploadResponse(BaseModel):
     """Schema for document upload response."""
-    status: str = Field(..., description="success, duplicate, or error")
+    status: str = Field(..., description="queued, success, duplicate, or error")
     document_id: int | None = Field(None, description="ID of created/existing document")
     message: str
     chunks_created: int
     embeddings_created: int
     page_count: int | None = None
+    task_id: str | None = Field(None, description="Celery task ID for async processing")
 
 
 class DocumentInfo(BaseModel):

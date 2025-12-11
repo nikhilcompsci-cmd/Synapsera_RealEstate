@@ -26,6 +26,13 @@ class Settings(BaseSettings):
     # CORS
     cors_origins: list[str] = ["http://localhost:3000", "http://localhost:8080"]
     
+    # Celery (Task Queue)
+    celery_broker_url: str = "redis://localhost:6379/0"  # Redis as message broker
+    celery_result_backend: str = "redis://localhost:6379/1"  # Redis for results
+    
+    # Data Storage
+    data_dir: str = "data"  # Base directory for uploads, indexes, etc.
+    
     @property
     def is_production(self) -> bool:
         """Check if running in production environment."""

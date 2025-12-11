@@ -33,6 +33,26 @@ async def lifespan(app: FastAPI):
     logger.info(f"Version: {settings.app_version}")
     logger.info(f"Database: {settings.database_url.split('@')[-1]}")  # Hide credentials
     
+    # Check Redis/Celery availability
+    try:
+        import redis
+        r = redis.from_url(settings.celery_broker_url)
+        r.ping()
+        logger.info("✅ Redis connection successful - Async processing enabled")
+        print("\n✅ Redis connected - Async document processing available\n")
+    except Exception as e:
+        logger.warning(f"⚠️ Redis not available: {e}")
+        print("\n" + "=" * 70)
+        print("⚠️  WARNING: Redis/Celery not running")
+        print("=" * 70)
+        print("Document ingestion will use SYNCHRONOUS processing (slower).")
+        print("\nTo enable async processing:")
+        print("  1. Install Redis: choco install redis-64 (run as Administrator)")
+        print("  2. Start Redis: redis-server")
+        print("  3. Start Celery worker: python start_celery_worker.py")
+        print("\nCurrent mode: Synchronous (documents processed during upload)")
+        print("=" * 70 + "\n")
+    
     yield
     
     # Shutdown

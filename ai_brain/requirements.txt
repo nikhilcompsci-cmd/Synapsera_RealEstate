@@ -27,6 +27,11 @@ Pillow==10.1.0       # Image processing
 # Sprint 3 - LLM Integration
 openai==1.54.0
 
+# Asynchronous Task Queue
+celery[redis]==5.3.4  # Distributed task queue
+redis==4.6.0          # Message broker and result backend (compatible with Celery 5.3)
+flower==2.0.1         # Celery monitoring web UI (optional)
+
 # Testing (Optional)
 httpx==0.26.0
 reportlab==4.0.7
