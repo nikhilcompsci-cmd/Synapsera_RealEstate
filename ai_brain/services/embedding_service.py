@@ -37,15 +37,16 @@ class EmbeddingService:
             texts: List of text strings to embed
         
         Returns:
-            numpy array of shape (len(texts), vector_dimension)
+            Normalized numpy array of shape (len(texts), vector_dimension)
         """
         if not texts:
             return np.array([])
         
-        # Generate embeddings
+        # Generate embeddings with explicit normalization
         embeddings = self.model.encode(
             texts,
             convert_to_numpy=True,
+            normalize_embeddings=True,  # Explicit normalization for consistency
             show_progress_bar=len(texts) > 10
         )
         
@@ -59,11 +60,12 @@ class EmbeddingService:
             text: Text string to embed
         
         Returns:
-            numpy array of shape (vector_dimension,)
+            Normalized numpy array of shape (vector_dimension,)
         """
         embedding = self.model.encode(
             text,
-            convert_to_numpy=True
+            convert_to_numpy=True,
+            normalize_embeddings=True  # Explicit normalization for consistency
         )
         
         return embedding

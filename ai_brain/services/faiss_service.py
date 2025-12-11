@@ -29,8 +29,9 @@ class FAISSService:
         Returns:
             FAISS index
         """
-        # Use L2 distance for similarity (can change to inner product if needed)
-        index = faiss.IndexFlatL2(dimension)
+        # Use Inner Product for cosine similarity with normalized embeddings
+        # IndexFlatIP is optimal for sentence-transformers normalized vectors
+        index = faiss.IndexFlatIP(dimension)
         
         # Optionally move to GPU
         if use_gpu and faiss.get_num_gpus() > 0:

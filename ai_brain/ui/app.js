@@ -22,6 +22,7 @@ window.addEventListener('DOMContentLoaded', () => {
  */
 async function createProject() {
     const projectName = document.getElementById('projectName').value.trim();
+    const projectDescription = document.getElementById('projectDescription').value.trim();
     const resultDiv = document.getElementById('projectCreateResult');
     
     if (!projectName) {
@@ -30,10 +31,15 @@ async function createProject() {
     }
     
     try {
+        const requestBody = { name: projectName };
+        if (projectDescription) {
+            requestBody.description = projectDescription;
+        }
+        
         const response = await fetch(`${API_BASE}/project`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: projectName })
+            body: JSON.stringify(requestBody)
         });
         
         if (!response.ok) {
@@ -44,8 +50,9 @@ async function createProject() {
         const data = await response.json();
         showSuccess(resultDiv, `Project created! ID: ${data.id}`);
         
-        // Clear input and reload projects
+        // Clear inputs and reload projects
         document.getElementById('projectName').value = '';
+        document.getElementById('projectDescription').value = '';
         await loadProjects();
         
         // Auto-select the new project
@@ -234,13 +241,15 @@ async function refreshStatus() {
             html += '<div class="mt-4"><h3 class="font-semibold mb-2">Documents:</h3><ul class="space-y-1">';
             
             data.documents.forEach(doc => {
-                const statusColor = doc.ingestion_status === 'completed' ? 'green' : 
-                                   doc.ingestion_status === 'failed' ? 'red' : 'yellow';
+                const statusColor = doc.status === 'completed' ? 'green' : 
+                                   doc.status === 'failed' ? 'red' : 'yellow';
                 html += `
                     <li class="text-xs bg-gray-50 p-2 rounded">
                         <div class="font-semibold">ID: ${doc.id} - ${doc.filename}</div>
                         <div class="text-gray-600">
-                            Status: <span class="text-${statusColor}-600 font-semibold">${doc.ingestion_status}</span> | 
+                            Status: <span class="text-${statusColor}-600 font-semibold">${doc.status}</span> | 
+                            Pages: ${doc.page_count || 'N/A'} | 
+                            Chunks: ${doc.chunk_count || 0} 
                             Pages: ${doc.page_count || 'N/A'} | 
                             Chunks: ${doc.chunk_count || 'N/A'}
                         </div>

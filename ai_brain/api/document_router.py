@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from pathlib import Path
 import shutil
+import logging
 from typing import List
 
 from db.session import get_db_session
@@ -16,6 +17,7 @@ from api.schemas import (
 )
 
 router = APIRouter(tags=["Documents"])
+logger = logging.getLogger(__name__)
 
 # Upload directory
 UPLOAD_DIR = Path("data/uploads")
@@ -47,10 +49,13 @@ async def upload_document(
     """
     # Validate file type
     if not file.filename.lower().endswith('.pdf'):
+        logger.warning(f"Invalid file type attempted: {file.filename}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Only PDF files are supported"
         )
+    
+    logger.info(f"Document upload started - Project ID: {project_id}, File: {file.filename}")
     
     # Create project-specific directory
     project_dir = UPLOAD_DIR / f"project_{project_id}"
@@ -61,7 +66,9 @@ async def upload_document(
     try:
         with file_path.open("wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
+        logger.info(f"File saved successfully: {file_path}")
     except Exception as e:
+        logger.error(f"Failed to save file {file.filename}: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to save file: {str(e)}"
@@ -71,6 +78,7 @@ async def upload_document(
     
     # Run ingestion pipeline
     try:
+        logger.info(f"Starting ingestion pipeline for {file.filename}")
         ingestion_service = IngestionService(session)
         result = await ingestion_service.ingest_document(
             project_id=project_id,
@@ -78,9 +86,11 @@ async def upload_document(
             filename=file.filename
         )
         
+        logger.info(f"Ingestion completed - Document ID: {result.get('document_id')}, Chunks: {result.get('chunks_created')}, Pages: {result.get('pages_processed')}")
         return DocumentUploadResponse(**result)
     
     except Exception as e:
+        logger.error(f"Ingestion failed for {file.filename}: {e}", exc_info=True)
         # Clean up file if ingestion fails
         if file_path.exists():
             file_path.unlink()

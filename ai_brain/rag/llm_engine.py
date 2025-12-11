@@ -3,11 +3,14 @@ LLM Engine - Generates answers using OpenAI GPT models
 """
 from typing import List, Optional
 import os
+import logging
 from openai import OpenAI
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 
 class LLMEngine:
@@ -18,7 +21,7 @@ class LLMEngine:
         self.client = OpenAI(api_key=os.getenv('OPENAI_API_KEY', ''))
         self.model_name = os.getenv('OPENAI_MODEL', 'gpt-4o-mini')
         self.temperature = float(os.getenv('OPENAI_TEMPERATURE', '0.3'))
-        self.max_tokens = int(os.getenv('OPENAI_MAX_TOKENS', '500'))
+        self.max_tokens = int(os.getenv('OPENAI_MAX_TOKENS', '1000'))  # Increased for comprehensive answers
     
     def _detect_language(self, text: str) -> str:
         """
@@ -56,7 +59,7 @@ class LLMEngine:
         """
         # Format context documents
         context = "\n\n".join([
-            f"[Document {i+1}]\n{chunk[:800]}"  # Limit chunk size
+            f"[Document {i+1}]\n{chunk}"  # Use full chunk text for complete context
             for i, chunk in enumerate(chunks)
         ])
         
@@ -97,13 +100,17 @@ Answer:"""
             Generated answer string
         """
         if not chunks:
+            logger.warning("No chunks provided for answer generation")
             return "I don't have enough information to answer this question. Please ensure documents have been uploaded and processed for this project."
+        
+        logger.debug(f"Generating answer for question: '{question[:100]}...' with {len(chunks)} chunks")
         
         # Build prompt with context
         prompt = self._build_prompt(question, chunks)
         
         try:
             # Call OpenAI Chat Completion API
+            logger.debug(f"Calling OpenAI API - Model: {self.model_name}, Temperature: {self.temperature}, Max Tokens: {self.max_tokens}")
             response = self.client.chat.completions.create(
                 model=self.model_name,
                 messages=[
@@ -125,15 +132,17 @@ Answer:"""
             
             # Extract answer from response
             answer = response.choices[0].message.content.strip()
+            tokens_used = response.usage.total_tokens
             
-            # Add usage info (optional, for debugging)
-            # tokens_used = response.usage.total_tokens
+            logger.info(f"Answer generated successfully - Tokens used: {tokens_used}, Answer length: {len(answer)} chars")
             
             return answer
             
         except Exception as e:
             # Handle API errors gracefully
             error_msg = str(e)
+            
+            logger.error(f"OpenAI API error: {error_msg}", exc_info=True)
             
             # Check for common errors
             if "authentication" in error_msg.lower() or "api_key" in error_msg.lower():

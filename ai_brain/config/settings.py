@@ -9,6 +9,12 @@ class Settings(BaseSettings):
     app_name: str = "AI Brain - Real Estate Document Analysis"
     app_version: str = "0.1.0"
     debug: bool = True
+    environment: str = "development"  # development, staging, production
+    
+    # Logging
+    log_level: str = "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+    log_file: str = "logs/app.log"
+    log_to_console: bool = True
     
     # Database
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5433/ai_brain"
@@ -19,6 +25,16 @@ class Settings(BaseSettings):
     
     # CORS
     cors_origins: list[str] = ["http://localhost:3000", "http://localhost:8080"]
+    
+    @property
+    def is_production(self) -> bool:
+        """Check if running in production environment."""
+        return self.environment == "production"
+    
+    @property
+    def is_development(self) -> bool:
+        """Check if running in development environment."""
+        return self.environment == "development"
     
     model_config = SettingsConfigDict(
         env_file=".env",

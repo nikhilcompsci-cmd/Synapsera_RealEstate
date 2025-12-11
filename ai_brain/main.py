@@ -3,8 +3,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 from datetime import datetime
+import logging
 
 from config.settings import get_settings
+from config.logging_config import setup_logging
 from db.session import engine
 from db.models import Base
 from api.project_router import router as project_router
@@ -13,24 +15,30 @@ from api.chat_router import router as chat_router
 from api.schemas import HealthResponse
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup and shutdown events."""
     # Startup
-    print(">> Starting AI Brain application...")
-    print(f">> Database: {settings.database_url.split('@')[-1]}")  # Hide credentials
+    setup_logging(
+        log_level=settings.log_level,
+        log_file=settings.log_file,  # Always log to file for debugging
+        enable_console=settings.log_to_console
+    )
     
-    # Create tables (for development - use Alembic in production)
-    # async with engine.begin() as conn:
-    #     await conn.run_sync(Base.metadata.create_all)
+    logger.info("Starting AI Brain application...")
+    logger.info(f"Environment: {settings.environment}")
+    logger.info(f"Version: {settings.app_version}")
+    logger.info(f"Database: {settings.database_url.split('@')[-1]}")  # Hide credentials
     
     yield
     
     # Shutdown
-    print(">> Shutting down AI Brain application...")
+    logger.info("Shutting down AI Brain application...")
     await engine.dispose()
+    logger.info("Database connections closed")
 
 
 # Create FastAPI application

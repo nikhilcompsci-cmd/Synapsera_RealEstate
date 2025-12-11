@@ -3,6 +3,7 @@ RAG Retriever - Handles query embedding and vector search
 """
 import numpy as np
 import asyncio
+import logging
 import faiss
 from typing import List, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,6 +13,8 @@ from pathlib import Path
 from db.models import Chunk
 from services.faiss_service import FAISSService
 from services.embedding_service import EmbeddingService
+
+logger = logging.getLogger(__name__)
 
 
 class Retriever:

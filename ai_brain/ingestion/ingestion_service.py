@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import Optional, Dict
 from sqlalchemy.ext.asyncio import AsyncSession
 import numpy as np
+import logging
 
 from db.repositories.project_repository import ProjectRepository
 from db.repositories.document_repository import DocumentRepository
@@ -11,6 +12,8 @@ from ingestion.pdf_extractor import PDFExtractor
 from ingestion.chunking import TextChunker
 from services.embedding_service import StubEmbeddingService
 from services.faiss_service import FAISSService
+
+logger = logging.getLogger(__name__)
 
 
 class IngestionService:
@@ -71,27 +74,37 @@ class IngestionService:
         """
         document_id = None
         
+        logger.info(f"Starting document ingestion - Project: {project_id}, File: {filename}")
+        
         try:
             # Start async transaction - THIS is where transaction control happens
             async with self.session.begin():
                 # Step 1: Verify project exists
+                logger.debug(f"Verifying project {project_id} exists")
                 project = await self.project_repo.get_by_id(project_id)
                 if not project:
+                    logger.error(f"Project {project_id} not found")
                     raise ValueError(f"Project {project_id} not found")
                 
                 # Step 2: Extract text + metadata + content hash
+                logger.info(f"Extracting text from PDF: {filename}")
                 extraction = self.pdf_extractor.extract(file_path)
                 
                 if extraction["error"]:
+                    logger.error(f"PDF extraction failed for {filename}: {extraction['error']}")
                     raise Exception(f"PDF extraction failed: {extraction['error']}")
                 
                 content_hash = extraction["content_hash"]
                 full_text = extraction["text"]
                 page_count = extraction["page_count"]
                 
+                logger.info(f"Extracted {len(full_text)} chars from {page_count} pages")
+                
                 # Step 3: Check for duplicate (by content hash)
+                logger.debug(f"Checking for duplicate document (hash: {content_hash[:16]}...)")
                 existing_doc = await self.document_repo.get_by_content_hash(content_hash)
                 if existing_doc:
+                    logger.warning(f"Duplicate document detected: {existing_doc.id}")
                     return {
                         "status": "duplicate",
                         "document_id": existing_doc.id,
@@ -101,6 +114,7 @@ class IngestionService:
                     }
                 
                 # Step 4: Create Document record with status='processing'
+                logger.info(f"Creating document record in database")
                 document = await self.document_repo.create(
                     project_id=project_id,
                     filename=filename,
@@ -111,23 +125,33 @@ class IngestionService:
                     extracted_text_length=len(full_text)
                 )
                 document_id = document.id
+                logger.info(f"Document created with ID: {document_id}")
                 
                 await self.document_repo.update_status(document_id, "processing")
                 
                 # Step 5: Chunk text
+                logger.info(f"Chunking text ({len(full_text)} characters)")
                 chunks_data = self.text_chunker.chunk_text(full_text)
                 
                 if not chunks_data:
+                    logger.error("No chunks generated from document")
                     raise Exception("No chunks generated from document")
                 
+                logger.info(f"Generated {len(chunks_data)} chunks")
+                
                 # Step 6: Create Chunk records
+                logger.debug(f"Saving chunks to database")
                 chunks = await self.chunk_repo.create_many(document_id, chunks_data)
+                logger.info(f"Saved {len(chunks)} chunks to database")
                 
                 # Step 7: Generate embeddings
+                logger.info(f"Generating embeddings for {len(chunks)} chunks")
                 chunk_texts = [chunk.text for chunk in chunks]
                 embeddings_array = self.embedding_service.embed_texts(chunk_texts)
+                logger.info(f"Generated {len(embeddings_array)} embeddings (dimension: {embeddings_array.shape[1] if len(embeddings_array) > 0 else 0})")
                 
                 # Step 8: Get or create FAISS index for project
+                logger.debug(f"Loading FAISS index for project {project_id}")
                 vector_dim = self.embedding_service.vector_dimension
                 faiss_index = self.faiss_service.get_or_create_index(
                     project_id=project_id,
