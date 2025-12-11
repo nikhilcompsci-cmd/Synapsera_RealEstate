@@ -39,15 +39,40 @@ class Settings(BaseSettings):
     sentry_traces_sample_rate: float = 1.0  # 100% transaction sampling
     sentry_enabled: bool = False  # Enable/disable Sentry
     
+    # Google Document AI (Production OCR)
+    gcp_project_id: str = ""  # Google Cloud Project ID
+    documentai_location: str = "us"  # Document AI processor location (us, eu, asia)
+    documentai_processor_id: str = ""  # Document AI processor ID
+    documentai_min_confidence: float = 0.8  # Minimum confidence threshold (0-1)
+    
+    # Environment-based feature flags
+    # Document AI: enabled in production only (cost optimization)
+    # Development uses free local OCR (pytesseract)
+    use_document_ai_in_production: bool = True  # Use Document AI in production
+    use_document_ai_in_development: bool = False  # Use basic OCR in dev (free)
+    
     @property
     def is_production(self) -> bool:
         """Check if running in production environment."""
-        return self.environment == "production"
+        return self.environment.lower() == "production"
     
     @property
     def is_development(self) -> bool:
         """Check if running in development environment."""
-        return self.environment == "development"
+        return self.environment.lower() in ["development", "dev"]
+    
+    @property
+    def should_use_document_ai(self) -> bool:
+        """
+        Determine if Document AI should be used based on environment.
+        
+        Returns:
+            True if Document AI should be used, False otherwise
+        """
+        if self.is_production:
+            return self.use_document_ai_in_production and bool(self.documentai_processor_id)
+        else:
+            return self.use_document_ai_in_development and bool(self.documentai_processor_id)
     
     model_config = SettingsConfigDict(
         env_file=".env",

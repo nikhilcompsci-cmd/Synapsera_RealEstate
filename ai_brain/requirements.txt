@@ -30,6 +30,9 @@ openai==1.54.0
 # Error Tracking & Monitoring
 sentry-sdk[fastapi,celery,sqlalchemy]==1.40.0  # Error tracking with integrations
 
+# Google Document AI (Production OCR - optional in dev)
+google-cloud-documentai==2.20.0  # High-accuracy OCR for production
+
 # Asynchronous Task Queue
 celery[redis]==5.3.4  # Distributed task queue
 redis==4.6.0          # Message broker and result backend (compatible with Celery 5.3)
