@@ -7,6 +7,7 @@ import logging
 
 from config.settings import get_settings
 from config.logging_config import setup_logging
+from config.sentry_config import init_sentry
 from db.session import engine
 from db.models import Base
 from api.project_router import router as project_router
@@ -26,6 +27,15 @@ async def lifespan(app: FastAPI):
         log_level=settings.log_level,
         log_file=settings.log_file,  # Always log to file for debugging
         enable_console=settings.log_to_console
+    )
+    
+    # Initialize Sentry for error tracking and monitoring
+    init_sentry(
+        dsn=settings.sentry_dsn,
+        environment=settings.sentry_environment or settings.environment,
+        traces_sample_rate=settings.sentry_traces_sample_rate,
+        enabled=settings.sentry_enabled,
+        release=settings.app_version
     )
     
     logger.info("Starting AI Brain application...")

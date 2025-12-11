@@ -372,6 +372,15 @@ def ingest_document_async(
             # Run async operation
             asyncio.run(record_failure_async())
             
+            # Track in Sentry for monitoring
+            track_failed_document(
+                filename=filename,
+                error_type=error_type.value,
+                error_message=error_classifier.sanitize_error_message(str(e)),
+                project_id=project_id,
+                user_id=user_id
+            )
+            
             logger.info(
                 "Failed document recorded for tracking",
                 extra={
@@ -429,6 +438,23 @@ def ingest_document_async(
                     'error_message': error_classifier.sanitize_error_message(str(e)),
                 }
             )
+            
+            # Send alert to Sentry (triggers email/Slack notifications)
+            try:
+                alert_admin(
+                    message=f"System issue in document ingestion: {filename}",
+                    error_type=error_type.value,
+                    context={
+                        'task_id': self.request.id,
+                        'filename': filename,
+                        'project_id': project_id,
+                        'error_message': error_classifier.sanitize_error_message(str(e)),
+                        'retry_count': self.request.retries,
+                        'max_retries': retry_config['max_retries']
+                    }
+                )
+            except Exception as sentry_error:
+                logger.warning(f"Failed to send Sentry alert: {sentry_error}")
         
         # Smart retry logic based on error classification
         if retry_config['can_auto_retry'] and self.request.retries < retry_config['max_retries']:

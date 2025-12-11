@@ -33,6 +33,12 @@ class Settings(BaseSettings):
     # Data Storage
     data_dir: str = "data"  # Base directory for uploads, indexes, etc.
     
+    # Sentry (Error Tracking & Monitoring)
+    sentry_dsn: str = ""  # Sentry Data Source Name
+    sentry_environment: str = "development"  # Sentry environment tag
+    sentry_traces_sample_rate: float = 1.0  # 100% transaction sampling
+    sentry_enabled: bool = False  # Enable/disable Sentry
+    
     @property
     def is_production(self) -> bool:
         """Check if running in production environment."""

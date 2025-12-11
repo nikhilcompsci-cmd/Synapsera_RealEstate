@@ -117,6 +117,30 @@ async def upload_document(
                     'project_id': project_id
                 }
             )
+            
+            # Send critical alert to Sentry (triggers immediate notification)
+            alert_admin(
+                message="Celery/Redis unavailable in production",
+                error_type="system_issue",
+                context={
+                    'error': str(celery_error),
+                    'filename': file.filename,
+                    'project_id': project_id,
+                    'impact': 'Document uploads blocked'
+                }
+            )
+            
+            # Also capture the exception for full stack trace
+            capture_exception_with_context(
+                exception=celery_error,
+                context={
+                    'filename': file.filename,
+                    'project_id': project_id
+                },
+                tags={'error_type': 'celery_unavailable', 'severity': 'critical'},
+                level="fatal"
+            )
+            
             raise HTTPException(
                 status_code=503,
                 detail="Service unavailable: Task queue is not accessible. Please contact support."
