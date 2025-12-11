@@ -32,6 +32,8 @@ from celery_app import celery_app, BaseTask
 from db.session import AsyncSessionLocal
 from ingestion.ingestion_service import IngestionService
 from config.settings import get_settings
+from services.error_classifier import error_classifier
+from services.failed_documents_service import failed_documents_service
 
 # Task-specific logger (automatically includes task ID in logs)
 logger = get_task_logger(__name__)
@@ -321,23 +323,75 @@ def ingest_document_async(
     
     except Exception as e:
         # ====================================================================
-        # ERROR HANDLING
+        # INTELLIGENT ERROR HANDLING WITH FAILURE RECOVERY
         # ====================================================================
         
         processing_time = time.time() - start_time
         
+        # Classify error using intelligent error classifier
+        error_type, retry_config = error_classifier.classify(e, context={
+            'project_id': project_id,
+            'filename': filename,
+            'file_size': file_path_obj.stat().st_size if file_path_obj.exists() else None,
+            'retry_count': self.request.retries,
+        })
+        
         logger.error(
-            f"Document ingestion failed",
+            "Document ingestion failed",
             extra={
                 'task_id': self.request.id,
                 'project_id': project_id,
                 'filename': filename,
                 'error': str(e),
                 'error_type': e.__class__.__name__,
+                'error_classification': error_type.value,
                 'processing_time': f"{processing_time:.2f}s",
+                'can_retry': retry_config['can_auto_retry'],
+                'max_retries': retry_config['max_retries'],
             },
             exc_info=True  # Include stack trace
         )
+        
+        # Record failure in database for tracking and recovery
+        try:
+            async def record_failure_async():
+                async with AsyncSessionLocal() as failure_db:
+                    await failed_documents_service.record_failure(
+                        db=failure_db,
+                        project_id=project_id,
+                        filename=filename,
+                        file_path=str(file_path_obj),
+                        exception=e,
+                        file_size=file_path_obj.stat().st_size if file_path_obj.exists() else None,
+                        failed_stage='ingestion',  # Could be more specific if we track stages
+                        processing_duration=processing_time,
+                        task_id=self.request.id,
+                        user_id=user_id,
+                    )
+            
+            # Run async operation
+            asyncio.run(record_failure_async())
+            
+            logger.info(
+                "Failed document recorded for tracking",
+                extra={
+                    'task_id': self.request.id,
+                    'filename': filename,
+                    'error_classification': error_type.value,
+                }
+            )
+        
+        except Exception as record_error:
+            # Don't fail the task if we can't record the failure
+            logger.error(
+                "Failed to record document failure in database",
+                extra={
+                    'task_id': self.request.id,
+                    'filename': filename,
+                    'record_error': str(record_error),
+                },
+                exc_info=True
+            )
         
         # Update task state
         self.update_state(
@@ -345,31 +399,84 @@ def ingest_document_async(
             meta={
                 'current': 0,
                 'total': 100,
-                'status': f'Ingestion failed: {str(e)}',
+                'status': f'Ingestion failed: {error_classifier.sanitize_error_message(str(e))}',
                 'stage': 'failed',
-                'error': str(e),
+                'error': error_classifier.sanitize_error_message(str(e)),
+                'error_type': error_type.value,
+                'can_retry': retry_config['can_auto_retry'],
             }
         )
         
-        # Retry task if it's a transient error
-        if self.request.retries < self.max_retries:
-            # Exponential backoff: 60s, 120s, 240s
-            retry_delay = 60 * (2 ** self.request.retries)
-            logger.warning(
-                f"Retrying task in {retry_delay}s (attempt {self.request.retries + 1}/{self.max_retries})",
-                extra={'task_id': self.request.id}
+        # Log notification/alert requirements
+        if retry_config['notify_user']:
+            logger.info(
+                "User notification required for failed document",
+                extra={
+                    'task_id': self.request.id,
+                    'user_id': user_id,
+                    'filename': filename,
+                    'error_type': error_type.value,
+                }
             )
-            raise self.retry(exc=e, countdown=retry_delay)
+        
+        if retry_config['alert_admin']:
+            logger.warning(
+                "⚠️ ADMIN ALERT: System issue detected in document ingestion",
+                extra={
+                    'task_id': self.request.id,
+                    'filename': filename,
+                    'error_type': error_type.value,
+                    'error_message': error_classifier.sanitize_error_message(str(e)),
+                }
+            )
+        
+        # Smart retry logic based on error classification
+        if retry_config['can_auto_retry'] and self.request.retries < retry_config['max_retries']:
+            # Use configured retry delay (may vary by error type)
+            retry_delay = retry_config['retry_delay']
+            
+            # Apply exponential backoff if configured
+            if retry_config['exponential_backoff']:
+                retry_delay = retry_delay * (2 ** self.request.retries)
+            
+            logger.warning(
+                f"Retrying task in {retry_delay}s (attempt {self.request.retries + 1}/{retry_config['max_retries']})",
+                extra={
+                    'task_id': self.request.id,
+                    'filename': filename,
+                    'error_type': error_type.value,
+                    'retry_delay': retry_delay,
+                }
+            )
+            
+            # Raise retry exception to trigger Celery retry
+            raise self.retry(exc=e, countdown=retry_delay, max_retries=retry_config['max_retries'])
+        
+        else:
+            # Cannot or should not retry
+            reason = "not allowed by error classification" if not retry_config['can_auto_retry'] else "max retries exceeded"
+            logger.error(
+                f"Task will not be retried: {reason}",
+                extra={
+                    'task_id': self.request.id,
+                    'filename': filename,
+                    'error_type': error_type.value,
+                    'retry_count': self.request.retries,
+                    'max_retries': retry_config['max_retries'],
+                }
+            )
         
         # Return error result
         return {
             'status': 'error',
-            'document_id': document_id,
-            'message': str(e),
+            'document_id': None,
+            'message': error_classifier.sanitize_error_message(str(e)),
+            'error_type': error_type.value,
             'chunks_created': 0,
             'embeddings_created': 0,
             'processing_time': processing_time,
             'task_id': self.request.id,
+            'can_retry': retry_config['can_auto_retry'],
         }
     
     finally:
