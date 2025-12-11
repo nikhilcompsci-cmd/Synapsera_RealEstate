@@ -56,7 +56,8 @@ class IngestionService:
         self,
         project_id: int,
         file_path: Path,
-        filename: str
+        filename: str,
+        validation_metadata: Optional[Dict] = None
     ) -> Dict:
         """
         Complete ingestion pipeline with async-safe transaction control.
@@ -115,6 +116,13 @@ class IngestionService:
                 
                 # Step 4: Create Document record with status='processing'
                 logger.info(f"Creating document record in database")
+                
+                # Merge validation metadata with extraction metadata
+                doc_metadata = validation_metadata if validation_metadata else {}
+                if extraction.get("extraction_metadata"):
+                    doc_metadata["extraction"] = extraction["extraction_metadata"]
+                doc_metadata["pdf_metadata"] = extraction.get("metadata", {})
+                
                 document = await self.document_repo.create(
                     project_id=project_id,
                     filename=filename,
@@ -122,7 +130,8 @@ class IngestionService:
                     file_size=file_path.stat().st_size,
                     content_hash=content_hash,
                     page_count=page_count,
-                    extracted_text_length=len(full_text)
+                    extracted_text_length=len(full_text),
+                    metadata=doc_metadata
                 )
                 document_id = document.id
                 logger.info(f"Document created with ID: {document_id}")

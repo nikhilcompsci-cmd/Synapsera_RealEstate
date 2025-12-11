@@ -10,6 +10,7 @@ from db.repositories.chunk_repository import ChunkRepository
 from db.repositories.embedding_metadata_repository import EmbeddingMetadataRepository
 from ingestion.ingestion_service import IngestionService
 from tasks.ingestion_tasks import ingest_document_async, get_task_status
+from services.document_validator import DocumentValidator, ValidationSeverity
 from api.schemas import (
     DocumentUploadResponse,
     IngestionStatusResponse,
@@ -48,7 +49,7 @@ async def upload_document(
     
     Returns status of the ingestion process.
     """
-    # Validate file type
+    # Basic file type check
     if not file.filename.lower().endswith('.pdf'):
         logger.warning(f"Invalid file type attempted: {file.filename}")
         raise HTTPException(
@@ -62,7 +63,7 @@ async def upload_document(
     project_dir = UPLOAD_DIR / f"project_{project_id}"
     project_dir.mkdir(parents=True, exist_ok=True)
     
-    # Save uploaded file
+    # Save uploaded file temporarily for validation
     file_path = project_dir / file.filename
     try:
         with file_path.open("wb") as buffer:
@@ -77,17 +78,77 @@ async def upload_document(
     finally:
         file.file.close()
     
+    # Validate document quality
+    logger.info(f"Validating document quality: {file.filename}")
+    validator = DocumentValidator()
+    validation_result = validator.validate(file_path)
+    
+    # Log validation results
+    logger.info(
+        f"Document validation completed - "
+        f"File: {file.filename}, "
+        f"Valid: {validation_result.is_valid}, "
+        f"Can Process: {validation_result.can_process}, "
+        f"Quality Score: {validation_result.quality_score:.2f}, "
+        f"Issues: {len(validation_result.issues)}"
+    )
+    
+    # Check if document can be processed
+    if not validation_result.can_process:
+        # Delete invalid file
+        try:
+            file_path.unlink()
+        except Exception:
+            pass
+        
+        # Build error message with details
+        error_details = {
+            "quality_score": validation_result.quality_score,
+            "issues": [issue.to_dict() for issue in validation_result.errors],
+            "metadata": validation_result.metadata
+        }
+        
+        error_msg = f"Document validation failed: {validation_result.errors[0].message if validation_result.errors else 'Invalid document'}"
+        
+        logger.warning(
+            f"Document rejected - File: {file.filename}, "
+            f"Reason: {error_msg}, "
+            f"Issues: {len(validation_result.issues)}"
+        )
+        
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=error_msg,
+            headers={"X-Validation-Details": str(error_details)}
+        )
+    
+    # Log warnings if any
+    if validation_result.warnings:
+        warnings_msg = "; ".join([w.message for w in validation_result.warnings])
+        logger.warning(
+            f"Document has warnings - File: {file.filename}, "
+            f"Warnings: {warnings_msg}"
+        )
+    
     # Try async ingestion with Celery
     # STRICT: In production, fail if Celery/Redis unavailable (no fallback)
     # DEVELOPMENT ONLY: Fallback to sync processing if Celery unavailable
     try:
         logger.info(f"Attempting async ingestion for {file.filename}")
         
+        # Prepare validation metadata for storage
+        validation_meta = {
+            "quality_score": validation_result.quality_score,
+            "validation_issues": [issue.to_dict() for issue in validation_result.issues],
+            "validation_metadata": validation_result.metadata
+        }
+        
         # Try to submit task to Celery queue
         task = ingest_document_async.delay(
             project_id=project_id,
             file_path=str(file_path),
-            filename=file.filename
+            filename=file.filename,
+            validation_metadata=validation_meta
         )
         
         logger.info(f"Ingestion task queued - Task ID: {task.id}, File: {file.filename}")

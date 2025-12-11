@@ -24,6 +24,11 @@ numpy<2.0.0
 pytesseract==0.3.10  # Tesseract OCR wrapper
 Pillow==10.1.0       # Image processing
 
+# Document Validation
+PyPDF2==3.0.1  # PDF structure validation
+python-magic==0.4.27  # MIME type detection (optional)
+python-magic-bin==0.4.14  # Binary for Windows
+
 # Sprint 3 - LLM Integration
 openai==1.54.0
 

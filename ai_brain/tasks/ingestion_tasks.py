@@ -59,7 +59,8 @@ def ingest_document_async(
     project_id: int,
     file_path: str,
     filename: str,
-    user_id: Optional[int] = None
+    user_id: Optional[int] = None,
+    validation_metadata: Optional[Dict] = None
 ) -> Dict:
     """
     Asynchronously ingest a document into the RAG system.
@@ -281,7 +282,8 @@ def ingest_document_async(
             ingestion_service.ingest_document(
                 project_id=project_id,
                 file_path=file_path_obj,
-                filename=filename
+                filename=filename,
+                validation_metadata=validation_metadata
             )
         )
         
