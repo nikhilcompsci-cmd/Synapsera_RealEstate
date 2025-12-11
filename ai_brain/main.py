@@ -33,7 +33,7 @@ async def lifespan(app: FastAPI):
     logger.info(f"Version: {settings.app_version}")
     logger.info(f"Database: {settings.database_url.split('@')[-1]}")  # Hide credentials
     
-    # Check Redis/Celery availability
+    # Check Redis/Celery availability (STRICT in production)
     try:
         import redis
         r = redis.from_url(settings.celery_broker_url)
@@ -41,17 +41,35 @@ async def lifespan(app: FastAPI):
         logger.info("✅ Redis connection successful - Async processing enabled")
         print("\n✅ Redis connected - Async document processing available\n")
     except Exception as e:
-        logger.warning(f"⚠️ Redis not available: {e}")
-        print("\n" + "=" * 70)
-        print("⚠️  WARNING: Redis/Celery not running")
-        print("=" * 70)
-        print("Document ingestion will use SYNCHRONOUS processing (slower).")
-        print("\nTo enable async processing:")
-        print("  1. Install Redis: choco install redis-64 (run as Administrator)")
-        print("  2. Start Redis: redis-server")
-        print("  3. Start Celery worker: python start_celery_worker.py")
-        print("\nCurrent mode: Synchronous (documents processed during upload)")
-        print("=" * 70 + "\n")
+        error_message = f"⚠️ Redis not available: {e}"
+        
+        if settings.is_production:
+            # PRODUCTION: Redis/Celery REQUIRED - Fail to start
+            logger.error("❌ PRODUCTION ERROR: Redis/Celery is required but not available")
+            print("\n" + "=" * 70)
+            print("❌ FATAL ERROR: Redis/Celery not available in PRODUCTION")
+            print("=" * 70)
+            print("Application cannot start in production without async processing.")
+            print("\nRequired actions:")
+            print("  1. Ensure Redis server is running")
+            print("  2. Verify celery_broker_url in environment variables")
+            print("  3. Start Celery workers before starting the API")
+            print("=" * 70 + "\n")
+            raise RuntimeError("Redis/Celery is required in production environment")
+        else:
+            # DEVELOPMENT: Warn but allow fallback to sync processing
+            logger.warning(error_message)
+            print("\n" + "=" * 70)
+            print("⚠️  DEV MODE WARNING: Redis/Celery not running")
+            print("=" * 70)
+            print("Document ingestion will FALLBACK to SYNCHRONOUS processing (slower).")
+            print("This fallback is ONLY available in development mode.")
+            print("\nTo enable async processing:")
+            print("  1. Install Redis: choco install redis-64 (run as Administrator)")
+            print("  2. Start Redis: redis-server")
+            print("  3. Start Celery worker: python start_celery_worker.py")
+            print("\nCurrent mode: Development (sync fallback enabled)")
+            print("=" * 70 + "\n")
     
     yield
     

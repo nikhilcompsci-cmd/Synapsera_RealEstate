@@ -77,7 +77,9 @@ async def upload_document(
     finally:
         file.file.close()
     
-    # Try async ingestion with Celery, fallback to sync if Redis unavailable
+    # Try async ingestion with Celery
+    # STRICT: In production, fail if Celery/Redis unavailable (no fallback)
+    # DEVELOPMENT ONLY: Fallback to sync processing if Celery unavailable
     try:
         logger.info(f"Attempting async ingestion for {file.filename}")
         
@@ -101,16 +103,36 @@ async def upload_document(
         )
     
     except Exception as celery_error:
-        # Celery/Redis not available - fallback to synchronous ingestion
+        # Check environment - PRODUCTION MUST NOT FALLBACK
+        from config.settings import get_settings
+        settings = get_settings()
+        
+        if settings.is_production:
+            # PRODUCTION: Fail fast - do not fallback to sync processing
+            logger.error(
+                f"❌ PRODUCTION ERROR: Celery/Redis unavailable. Cannot process document.",
+                extra={
+                    'error': str(celery_error),
+                    'filename': file.filename,
+                    'project_id': project_id
+                }
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="Service unavailable: Task queue is not accessible. Please contact support."
+            )
+        
+        # DEVELOPMENT ONLY: Fallback to synchronous ingestion
         error_msg = (
-            "⚠️ WARNING: Async processing unavailable - Redis/Celery not running. "
+            "⚠️ DEV MODE: Async processing unavailable - Redis/Celery not running. "
             "Using synchronous processing (slower). "
-            "To enable async: Install Redis and start Celery worker."
+            "To enable async: Install Redis and start Celery worker. "
+            "NOTE: This fallback is DISABLED in production."
         )
         logger.warning(f"{error_msg} Error: {celery_error}")
         
         try:
-            logger.info(f"Starting synchronous ingestion for {file.filename}")
+            logger.info(f"[DEV FALLBACK] Starting synchronous ingestion for {file.filename}")
             print(f"\n{error_msg}\n")  # Print to console for visibility
             
             ingestion_service = IngestionService(session)
