@@ -33,6 +33,13 @@ class Settings(BaseSettings):
     # Data Storage
     data_dir: str = "data"  # Base directory for uploads, indexes, etc.
     
+    # OpenAI Configuration (Sprint 3)
+    openai_api_key: str = "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"  # OpenAI API key for embeddings and LLM
+    openai_model: str = "gpt-4o-mini"  # Model for chat/queries
+    openai_embedding_model: str = "text-embedding-3-small"  # Model for embeddings
+    openai_temperature: float = 0.3  # Response randomness (0-2)
+    openai_max_tokens: int = 1000  # Max response length
+    
     # Sentry (Error Tracking & Monitoring)
     sentry_dsn: str = ""  # Sentry Data Source Name
     sentry_environment: str = "development"  # Sentry environment tag
@@ -50,6 +57,16 @@ class Settings(BaseSettings):
     # Development uses free local OCR (pytesseract)
     use_document_ai_in_production: bool = True  # Use Document AI in production
     use_document_ai_in_development: bool = False  # Use basic OCR in dev (free)
+    
+    # Twilio WhatsApp Messaging
+    twilio_account_sid: str = ""  # Twilio Account SID
+    twilio_auth_token: str = ""  # Twilio Auth Token
+    twilio_whatsapp_from: str = ""  # Twilio WhatsApp number (e.g., whatsapp:+14155238886)
+    twilio_enabled: bool = False  # Enable/disable WhatsApp messaging
+    
+    # Ngrok Configuration (for webhook development)
+    ngrok_auth_token: str = ""  # Ngrok auth token
+    app_port: int = 8000  # Port where FastAPI is running
     
     @property
     def is_production(self) -> bool:

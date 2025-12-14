@@ -169,7 +169,21 @@ async function uploadDocument() {
         }
         
         const data = await response.json();
-        showSuccess(resultDiv, `Upload successful! Document ID: ${data.document_id}, Pages: ${data.page_count}, Chunks: ${data.chunk_count}`);
+        
+        // Handle async (queued) vs sync (completed) responses
+        if (data.status === 'queued') {
+            showInfo(resultDiv, `Upload successful! Processing in background... Task ID: ${data.task_id || 'N/A'}`);
+            // Poll for task completion
+            if (data.task_id) {
+                pollTaskStatus(data.task_id, resultDiv);
+            }
+        } else {
+            // Sync processing completed
+            const docId = data.document_id || 'N/A';
+            const pages = data.page_count || data.page_count === 0 ? data.page_count : 'N/A';
+            const chunks = data.chunks_created || data.chunk_count || 0;
+            showSuccess(resultDiv, `Upload successful! Document ID: ${docId}, Pages: ${pages}, Chunks: ${chunks}`);
+        }
         
         // Clear file input
         fileInput.value = '';
@@ -182,6 +196,61 @@ async function uploadDocument() {
         const errorMsg = error.message || String(error) || 'Upload failed';
         showError(resultDiv, errorMsg);
     }
+}
+
+// Poll for task status (for async processing)
+async function pollTaskStatus(taskId, resultDiv, maxAttempts = 60) {
+    let attempts = 0;
+    
+    const checkStatus = async () => {
+        try {
+            const response = await fetch(`${API_BASE}/task/${taskId}/status`);
+            if (!response.ok) {
+                throw new Error('Failed to check task status');
+            }
+            
+            const status = await response.json();
+            
+            if (status.state === 'SUCCESS') {
+                // Task completed successfully
+                const result = status.result || {};
+                const docId = result.document_id || 'N/A';
+                const pages = result.page_count || 'N/A';
+                const chunks = result.chunks_created || 0;
+                showSuccess(resultDiv, `Processing complete! Document ID: ${docId}, Pages: ${pages}, Chunks: ${chunks}`);
+                refreshStatus();
+                return;
+            } else if (status.state === 'FAILURE') {
+                // Task failed
+                const error = status.error || 'Processing failed';
+                showError(resultDiv, `Processing failed: ${error}`);
+                refreshStatus();
+                return;
+            } else if (status.state === 'PROGRESS') {
+                // Show progress
+                const info = status.info || {};
+                showInfo(resultDiv, `Processing... ${info.stage || 'in progress'}`);
+            }
+            
+            // Continue polling if still processing
+            attempts++;
+            if (attempts < maxAttempts) {
+                setTimeout(checkStatus, 2000); // Check every 2 seconds
+            } else {
+                showInfo(resultDiv, 'Processing is taking longer than expected. Check status later.');
+                refreshStatus();
+            }
+        } catch (error) {
+            console.error('Task status check error:', error);
+            attempts++;
+            if (attempts < maxAttempts) {
+                setTimeout(checkStatus, 2000);
+            }
+        }
+    };
+    
+    // Start polling after 2 seconds
+    setTimeout(checkStatus, 2000);
 }
 
 // ==================== INGESTION STATUS ====================

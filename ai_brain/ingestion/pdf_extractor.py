@@ -84,31 +84,53 @@ class PDFExtractor:
                 full_text = "\n\n".join(text_parts)
                 
                 # If no text extracted (image-based PDF), try OCR
-                if not full_text.strip() and OCR_AVAILABLE:
-                    logger.warning(f"No text extracted with pdfplumber, attempting OCR on {file_path}")
-                    try:
-                        # Use pdfplumber to convert pages to images for OCR
-                        ocr_text_parts = []
-                        for page_num, page in enumerate(pdf.pages):
-                            try:
-                                # Convert page to image using pdfplumber
-                                img = page.to_image(resolution=300)  # Higher DPI = better OCR
-                                # Convert to PIL Image
-                                pil_image = img.original
-                                # Extract text using Tesseract
-                                text = pytesseract.image_to_string(pil_image)
-                                if text and text.strip():
-                                    ocr_text_parts.append(text.strip())
-                                    logger.debug(f"OCR extracted {len(text)} chars from page {page_num+1}")
-                            except Exception as e:
-                                logger.warning(f"OCR failed on page {page_num+1}: {e}")
-                        
-                        full_text = "\n\n".join(ocr_text_parts)
-                        logger.info(f"OCR extraction complete: {len(full_text)} chars from {len(ocr_text_parts)} pages")
-                    except Exception as e:
-                        logger.error(f"OCR processing failed: {e}")
-                elif not full_text.strip() and not OCR_AVAILABLE:
-                    logger.error("No text extracted and OCR not available. Install pytesseract and pdf2image for image-based PDFs.")
+                if not full_text.strip():
+                    if OCR_AVAILABLE:
+                        logger.warning(f"No text extracted with pdfplumber, attempting OCR on {file_path}")
+                        try:
+                            # Use pdfplumber to convert pages to images for OCR
+                            ocr_text_parts = []
+                            for page_num, page in enumerate(pdf.pages):
+                                try:
+                                    # Convert page to image using pdfplumber
+                                    img = page.to_image(resolution=300)  # Higher DPI = better OCR
+                                    # Convert to PIL Image
+                                    pil_image = img.original
+                                    # Extract text using Tesseract
+                                    text = pytesseract.image_to_string(pil_image)
+                                    if text and text.strip():
+                                        ocr_text_parts.append(text.strip())
+                                        logger.debug(f"OCR extracted {len(text)} chars from page {page_num+1}")
+                                except Exception as e:
+                                    logger.warning(f"OCR failed on page {page_num+1}: {e}")
+                            
+                            if ocr_text_parts:
+                                full_text = "\n\n".join(ocr_text_parts)
+                                logger.info(f"OCR extraction complete: {len(full_text)} chars from {len(ocr_text_parts)} pages")
+                            else:
+                                logger.error(f"OCR failed to extract any text from {file_path}")
+                                return {
+                                    "text": "",
+                                    "page_count": page_count,
+                                    "metadata": {},
+                                    "error": "This PDF contains images or scanned pages. OCR extraction failed. Please provide a text-based PDF or install Tesseract OCR properly."
+                                }
+                        except Exception as e:
+                            logger.error(f"OCR processing failed: {e}")
+                            return {
+                                "text": "",
+                                "page_count": page_count,
+                                "metadata": {},
+                                "error": f"OCR extraction failed: {str(e)}. Please provide a text-based PDF."
+                            }
+                    else:
+                        logger.error(f"No text extracted and OCR not available for {file_path}")
+                        return {
+                            "text": "",
+                            "page_count": page_count,
+                            "metadata": {},
+                            "error": "This PDF contains images or scanned pages but OCR is not installed. To process image-based PDFs, install Tesseract OCR: https://github.com/UB-Mannheim/tesseract/wiki"
+                        }
                 
                 # Extract PDF metadata
                 metadata = {}
