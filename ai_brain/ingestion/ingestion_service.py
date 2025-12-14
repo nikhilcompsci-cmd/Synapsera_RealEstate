@@ -131,7 +131,7 @@ class IngestionService:
                     content_hash=content_hash,
                     page_count=page_count,
                     extracted_text_length=len(full_text),
-                    metadata=doc_metadata
+                    validation_metadata=doc_metadata
                 )
                 document_id = document.id
                 logger.info(f"Document created with ID: {document_id}")
