@@ -1,0 +1,51 @@
+# Core Framework
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+
+# Database
+sqlalchemy[asyncio]==2.0.25
+asyncpg==0.29.0
+psycopg2-binary==2.9.9
+alembic==1.13.1
+
+# Data Validation
+pydantic>=2.5.3
+pydantic-settings==2.1.0
+
+# File Upload
+python-multipart==0.0.6
+
+# Sprint 2 - Document Ingestion
+pdfplumber==0.11.0  # PDF text extraction + OCR image conversion
+sentence-transformers>=2.2.2
+faiss-cpu==1.8.0
+numpy<2.0.0
+
+# OCR for Image-based PDFs
+pytesseract==0.3.10  # Tesseract OCR wrapper
+Pillow==10.1.0       # Image processing
+
+# Document Validation
+PyPDF2==3.0.1  # PDF structure validation
+python-magic==0.4.27  # MIME type detection
+
+# Sprint 3 - LLM Integration
+openai==1.54.0
+
+# Error Tracking & Monitoring
+sentry-sdk[fastapi,celery,sqlalchemy]==1.40.0  # Error tracking with integrations
+
+# Google Document AI (Production OCR - optional in dev)
+google-cloud-documentai==2.20.0  # High-accuracy OCR for production
+
+# Asynchronous Task Queue
+celery[redis]==5.3.4  # Distributed task queue
+redis==4.6.0          # Message broker and result backend (compatible with Celery 5.3)
+flower==2.0.1         # Celery monitoring web UI (optional)
+
+# Structured Logging
+structlog==25.5.0
+
+# Testing (Optional)
+httpx==0.26.0
+reportlab==4.0.7

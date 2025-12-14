@@ -75,7 +75,7 @@ class Settings(BaseSettings):
             return self.use_document_ai_in_development and bool(self.documentai_processor_id)
     
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file="environment/.env",
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra='ignore'  # Allow extra fields in .env (e.g., OpenAI config)
