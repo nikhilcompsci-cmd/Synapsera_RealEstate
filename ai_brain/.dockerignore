@@ -1,0 +1,79 @@
+# Docker Ignore File
+# Prevents unnecessary files from being copied into Docker image
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv/
+
+# Environment files (use .env.docker instead)
+.env
+.env.local
+.env.development
+.env.production
+.env.sentry
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Logs (will be mounted as volume)
+logs/
+*.log
+
+# Data (will be mounted as volume)
+data/
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Documentation
+*.md
+!README.md
+
+# Test files
+test_*.py
+*_test.py
+tests/
+
+# Scripts
+*.bat
+*.ps1
+verify*.py
+check_*.py
+analyze_*.py
+debug_*.py
+migrate_*.py
+start_*.py
+run_*.py
+
+# Alembic (keep for migrations)
+# alembic/versions/*.py will be included
+
+# Docker
+Dockerfile
+docker-compose*.yml
+.dockerignore

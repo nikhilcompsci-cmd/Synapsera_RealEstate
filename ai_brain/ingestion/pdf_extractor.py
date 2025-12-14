@@ -2,10 +2,43 @@ import hashlib
 from pathlib import Path
 from typing import Dict, Optional
 import pdfplumber
+import logging
+
+# OCR imports for image-based PDFs
+try:
+    import pytesseract
+    from PIL import Image
+    
+    # Configure Tesseract path for Windows
+    pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+    
+    OCR_AVAILABLE = True
+except ImportError:
+    OCR_AVAILABLE = False
+
+# Document AI imports (production only)
+try:
+    from services.document_ai_service import DocumentAIService
+    DOCUMENT_AI_AVAILABLE = True
+except ImportError:
+    DOCUMENT_AI_AVAILABLE = False
+
+from config.settings import get_settings
+
+logger = logging.getLogger(__name__)
+settings = get_settings()
 
 
 class PDFExtractor:
-    """Extract text and metadata from PDF files using pdfplumber."""
+    """
+    Extract text and metadata from PDF files.
+    
+    Environment-Aware Extraction:
+    - Production: Uses Google Document AI (95-99% accuracy, costs money)
+    - Development: Uses pdfplumber + pytesseract (70-90% accuracy, free)
+    
+    This ensures cost optimization while maintaining high quality in production.
+    """
     
     @staticmethod
     def calculate_content_hash(file_path: Path) -> str:
@@ -50,6 +83,33 @@ class PDFExtractor:
                 
                 full_text = "\n\n".join(text_parts)
                 
+                # If no text extracted (image-based PDF), try OCR
+                if not full_text.strip() and OCR_AVAILABLE:
+                    logger.warning(f"No text extracted with pdfplumber, attempting OCR on {file_path}")
+                    try:
+                        # Use pdfplumber to convert pages to images for OCR
+                        ocr_text_parts = []
+                        for page_num, page in enumerate(pdf.pages):
+                            try:
+                                # Convert page to image using pdfplumber
+                                img = page.to_image(resolution=300)  # Higher DPI = better OCR
+                                # Convert to PIL Image
+                                pil_image = img.original
+                                # Extract text using Tesseract
+                                text = pytesseract.image_to_string(pil_image)
+                                if text and text.strip():
+                                    ocr_text_parts.append(text.strip())
+                                    logger.debug(f"OCR extracted {len(text)} chars from page {page_num+1}")
+                            except Exception as e:
+                                logger.warning(f"OCR failed on page {page_num+1}: {e}")
+                        
+                        full_text = "\n\n".join(ocr_text_parts)
+                        logger.info(f"OCR extraction complete: {len(full_text)} chars from {len(ocr_text_parts)} pages")
+                    except Exception as e:
+                        logger.error(f"OCR processing failed: {e}")
+                elif not full_text.strip() and not OCR_AVAILABLE:
+                    logger.error("No text extracted and OCR not available. Install pytesseract and pdf2image for image-based PDFs.")
+                
                 # Extract PDF metadata
                 metadata = {}
                 if pdf.metadata:
@@ -84,15 +144,112 @@ class PDFExtractor:
             }
     
     @staticmethod
+    def extract_with_document_ai(file_path: Path) -> Dict:
+        """
+        Extract text using Google Document AI (production only).
+        
+        Returns:
+            dict with keys: text, page_count, metadata, error, extraction_metadata
+        """
+        logger.info(f"Using Document AI for extraction: {file_path}")
+        
+        try:
+            # Initialize Document AI service
+            doc_ai_service = DocumentAIService(settings)
+            
+            # Process PDF
+            result = doc_ai_service.process_pdf(str(file_path))
+            
+            # Build extraction metadata
+            extraction_metadata = {
+                'method': result.method,
+                'confidence': result.confidence,
+                'tables_extracted': result.tables_count,
+                'entities_extracted': result.entities_count,
+                'requires_review': result.requires_review,
+                'warnings': result.warnings,
+                'layout_preserved': result.layout_preserved
+            }
+            
+            # Store tables and entities if extracted
+            if result.tables:
+                extraction_metadata['tables'] = result.tables
+            
+            if result.entities:
+                extraction_metadata['entities'] = result.entities
+            
+            logger.info(
+                f"Document AI extraction complete: {len(result.text)} chars, "
+                f"{result.pages_count} pages, confidence: {result.confidence:.1f}%"
+            )
+            
+            return {
+                "text": result.text,
+                "page_count": result.pages_count,
+                "metadata": extraction_metadata,
+                "error": None,
+                "extraction_metadata": extraction_metadata  # For db storage
+            }
+            
+        except Exception as e:
+            logger.error(f"Document AI extraction failed: {e}", exc_info=True)
+            return {
+                "text": "",
+                "page_count": 0,
+                "metadata": {},
+                "error": f"Document AI failed: {str(e)}",
+                "extraction_metadata": {'method': 'document_ai', 'error': str(e)}
+            }
+    
+    @staticmethod
     def extract(file_path: Path) -> Dict:
         """
         Complete extraction: content hash + text + metadata.
         
+        Environment-Aware Strategy:
+        1. Production: Try Document AI first, fallback to basic extraction
+        2. Development: Use basic extraction (pdfplumber + pytesseract)
+        
         Returns:
-            dict with keys: content_hash, text, page_count, metadata, error
+            dict with keys: content_hash, text, page_count, metadata, error, extraction_metadata
         """
         content_hash = PDFExtractor.calculate_content_hash(file_path)
+        
+        # PRODUCTION: Use Document AI
+        if settings.should_use_document_ai and DOCUMENT_AI_AVAILABLE:
+            logger.info(
+                f"Production environment detected - using Document AI for {file_path.name}"
+            )
+            
+            # Try Document AI
+            doc_ai_result = PDFExtractor.extract_with_document_ai(file_path)
+            
+            # If Document AI succeeded, return result
+            if not doc_ai_result["error"]:
+                return {
+                    "content_hash": content_hash,
+                    **doc_ai_result
+                }
+            
+            # Document AI failed, log warning and fall back
+            logger.warning(
+                f"Document AI failed, falling back to basic extraction: {doc_ai_result['error']}"
+            )
+        
+        # DEVELOPMENT or FALLBACK: Use basic extraction
+        logger.info(
+            f"{'Development' if settings.is_development else 'Fallback'} mode - "
+            f"using pdfplumber + pytesseract for {file_path.name}"
+        )
+        
         extraction_result = PDFExtractor.extract_text_and_metadata(file_path)
+        
+        # Add extraction method to metadata
+        if 'extraction_metadata' not in extraction_result:
+            extraction_result['extraction_metadata'] = {
+                'method': 'pdfplumber' if extraction_result.get('text') else 'pytesseract',
+                'environment': settings.environment
+            }
         
         return {
             "content_hash": content_hash,

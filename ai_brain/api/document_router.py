@@ -2,12 +2,15 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from pathlib import Path
 import shutil
+import logging
 from typing import List
 
 from db.session import get_db_session
 from db.repositories.chunk_repository import ChunkRepository
 from db.repositories.embedding_metadata_repository import EmbeddingMetadataRepository
 from ingestion.ingestion_service import IngestionService
+from tasks.ingestion_tasks import ingest_document_async, get_task_status
+from services.document_validator import DocumentValidator, ValidationSeverity
 from api.schemas import (
     DocumentUploadResponse,
     IngestionStatusResponse,
@@ -16,6 +19,7 @@ from api.schemas import (
 )
 
 router = APIRouter(tags=["Documents"])
+logger = logging.getLogger(__name__)
 
 # Upload directory
 UPLOAD_DIR = Path("data/uploads")
@@ -45,23 +49,28 @@ async def upload_document(
     
     Returns status of the ingestion process.
     """
-    # Validate file type
+    # Basic file type check
     if not file.filename.lower().endswith('.pdf'):
+        logger.warning(f"Invalid file type attempted: {file.filename}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Only PDF files are supported"
         )
     
+    logger.info(f"Document upload started - Project ID: {project_id}, File: {file.filename}")
+    
     # Create project-specific directory
     project_dir = UPLOAD_DIR / f"project_{project_id}"
     project_dir.mkdir(parents=True, exist_ok=True)
     
-    # Save uploaded file
+    # Save uploaded file temporarily for validation
     file_path = project_dir / file.filename
     try:
         with file_path.open("wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
+        logger.info(f"File saved successfully: {file_path}")
     except Exception as e:
+        logger.error(f"Failed to save file {file.filename}: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to save file: {str(e)}"
@@ -69,25 +78,198 @@ async def upload_document(
     finally:
         file.file.close()
     
-    # Run ingestion pipeline
-    try:
-        ingestion_service = IngestionService(session)
-        result = await ingestion_service.ingest_document(
-            project_id=project_id,
-            file_path=file_path,
-            filename=file.filename
+    # Validate document quality
+    logger.info(f"Validating document quality: {file.filename}")
+    validator = DocumentValidator()
+    validation_result = validator.validate(file_path)
+    
+    # Log validation results
+    logger.info(
+        f"Document validation completed - "
+        f"File: {file.filename}, "
+        f"Valid: {validation_result.is_valid}, "
+        f"Can Process: {validation_result.can_process}, "
+        f"Quality Score: {validation_result.quality_score:.2f}, "
+        f"Issues: {len(validation_result.issues)}"
+    )
+    
+    # Check if document can be processed
+    if not validation_result.can_process:
+        # Delete invalid file
+        try:
+            file_path.unlink()
+        except Exception:
+            pass
+        
+        # Build error message with details
+        error_details = {
+            "quality_score": validation_result.quality_score,
+            "issues": [issue.to_dict() for issue in validation_result.errors],
+            "metadata": validation_result.metadata
+        }
+        
+        error_msg = f"Document validation failed: {validation_result.errors[0].message if validation_result.errors else 'Invalid document'}"
+        
+        logger.warning(
+            f"Document rejected - File: {file.filename}, "
+            f"Reason: {error_msg}, "
+            f"Issues: {len(validation_result.issues)}"
         )
         
-        return DocumentUploadResponse(**result)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=error_msg,
+            headers={"X-Validation-Details": str(error_details)}
+        )
     
-    except Exception as e:
-        # Clean up file if ingestion fails
-        if file_path.exists():
-            file_path.unlink()
+    # Log warnings if any
+    if validation_result.warnings:
+        warnings_msg = "; ".join([w.message for w in validation_result.warnings])
+        logger.warning(
+            f"Document has warnings - File: {file.filename}, "
+            f"Warnings: {warnings_msg}"
+        )
+    
+    # Try async ingestion with Celery
+    # STRICT: In production, fail if Celery/Redis unavailable (no fallback)
+    # DEVELOPMENT ONLY: Fallback to sync processing if Celery unavailable
+    try:
+        logger.info(f"Attempting async ingestion for {file.filename}")
         
+        # Prepare validation metadata for storage
+        validation_meta = {
+            "quality_score": validation_result.quality_score,
+            "validation_issues": [issue.to_dict() for issue in validation_result.issues],
+            "validation_metadata": validation_result.metadata
+        }
+        
+        # Try to submit task to Celery queue
+        task = ingest_document_async.delay(
+            project_id=project_id,
+            file_path=str(file_path),
+            filename=file.filename,
+            validation_metadata=validation_meta
+        )
+        
+        logger.info(f"Ingestion task queued - Task ID: {task.id}, File: {file.filename}")
+        
+        # Return immediately with task ID (non-blocking)
+        return DocumentUploadResponse(
+            status="queued",
+            message=f"Document upload successful. Ingestion started asynchronously.",
+            document_id=None,  # Will be set when task completes
+            chunks_created=0,
+            embeddings_created=0,
+            task_id=task.id  # Client can poll this for progress
+        )
+    
+    except Exception as celery_error:
+        # Check environment - PRODUCTION MUST NOT FALLBACK
+        from config.settings import get_settings
+        settings = get_settings()
+        
+        if settings.is_production:
+            # PRODUCTION: Fail fast - do not fallback to sync processing
+            logger.error(
+                f"❌ PRODUCTION ERROR: Celery/Redis unavailable. Cannot process document.",
+                extra={
+                    'error': str(celery_error),
+                    'filename': file.filename,
+                    'project_id': project_id
+                }
+            )
+            
+            # Send critical alert to Sentry (triggers immediate notification)
+            alert_admin(
+                message="Celery/Redis unavailable in production",
+                error_type="system_issue",
+                context={
+                    'error': str(celery_error),
+                    'filename': file.filename,
+                    'project_id': project_id,
+                    'impact': 'Document uploads blocked'
+                }
+            )
+            
+            # Also capture the exception for full stack trace
+            capture_exception_with_context(
+                exception=celery_error,
+                context={
+                    'filename': file.filename,
+                    'project_id': project_id
+                },
+                tags={'error_type': 'celery_unavailable', 'severity': 'critical'},
+                level="fatal"
+            )
+            
+            raise HTTPException(
+                status_code=503,
+                detail="Service unavailable: Task queue is not accessible. Please contact support."
+            )
+        
+        # DEVELOPMENT ONLY: Fallback to synchronous ingestion
+        error_msg = (
+            "⚠️ DEV MODE: Async processing unavailable - Redis/Celery not running. "
+            "Using synchronous processing (slower). "
+            "To enable async: Install Redis and start Celery worker. "
+            "NOTE: This fallback is DISABLED in production."
+        )
+        logger.warning(f"{error_msg} Error: {celery_error}")
+        
+        try:
+            logger.info(f"[DEV FALLBACK] Starting synchronous ingestion for {file.filename}")
+            print(f"\n{error_msg}\n")  # Print to console for visibility
+            
+            ingestion_service = IngestionService(session)
+            result = await ingestion_service.ingest_document(
+                project_id=project_id,
+                file_path=file_path,
+                filename=file.filename
+            )
+            
+            logger.info(f"Synchronous ingestion completed - Document ID: {result.get('document_id')}")
+            
+            # Add warning message to response
+            result['message'] = f"{result.get('message', '')} (Note: Processed synchronously - Redis unavailable)"
+            return DocumentUploadResponse(**result)
+        
+        except Exception as ingestion_error:
+            logger.error(f"Synchronous ingestion failed for {file.filename}: {ingestion_error}", exc_info=True)
+            # Clean up file if ingestion fails
+            if file_path.exists():
+                file_path.unlink()
+            
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Ingestion failed: {str(ingestion_error)}"
+            )
+
+
+@router.get(
+    "/task/{task_id}/status",
+    summary="Get status of an ingestion task"
+)
+async def get_task_status_endpoint(task_id: str):
+    """
+    Get the current status of a Celery ingestion task.
+    
+    States:
+    - PENDING: Task is waiting in queue
+    - PROGRESS: Task is currently processing (includes progress info)
+    - SUCCESS: Task completed successfully
+    - FAILURE: Task failed permanently
+    - RETRY: Task is being retried
+    
+    Returns progress information if task is in PROGRESS state.
+    """
+    try:
+        status = get_task_status(task_id)
+        return status
+    except Exception as e:
+        logger.error(f"Failed to get task status for {task_id}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Ingestion failed: {str(e)}"
+            detail=f"Failed to get task status: {str(e)}"
         )
 
 
@@ -96,7 +278,7 @@ async def upload_document(
     response_model=IngestionStatusResponse,
     summary="Get ingestion status for a project"
 )
-async def get_ingestion_status(
+async def get_project_ingestion_status(
     project_id: int,
     session: AsyncSession = Depends(get_db_session)
 ) -> IngestionStatusResponse:

@@ -3,8 +3,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 from datetime import datetime
+import logging
 
 from config.settings import get_settings
+from config.logging_config import setup_logging
+from config.sentry_config import init_sentry
 from db.session import engine
 from db.models import Base
 from api.project_router import router as project_router
@@ -13,24 +16,77 @@ from api.chat_router import router as chat_router
 from api.schemas import HealthResponse
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup and shutdown events."""
     # Startup
-    print(">> Starting AI Brain application...")
-    print(f">> Database: {settings.database_url.split('@')[-1]}")  # Hide credentials
+    setup_logging(
+        log_level=settings.log_level,
+        log_file=settings.log_file,  # Always log to file for debugging
+        enable_console=settings.log_to_console
+    )
     
-    # Create tables (for development - use Alembic in production)
-    # async with engine.begin() as conn:
-    #     await conn.run_sync(Base.metadata.create_all)
+    # Initialize Sentry for error tracking and monitoring
+    init_sentry(
+        dsn=settings.sentry_dsn,
+        environment=settings.sentry_environment or settings.environment,
+        traces_sample_rate=settings.sentry_traces_sample_rate,
+        enabled=settings.sentry_enabled,
+        release=settings.app_version
+    )
+    
+    logger.info("Starting AI Brain application...")
+    logger.info(f"Environment: {settings.environment}")
+    logger.info(f"Version: {settings.app_version}")
+    logger.info(f"Database: {settings.database_url.split('@')[-1]}")  # Hide credentials
+    
+    # Check Redis/Celery availability (STRICT in production)
+    try:
+        import redis
+        r = redis.from_url(settings.celery_broker_url)
+        r.ping()
+        logger.info("✅ Redis connection successful - Async processing enabled")
+        print("\n✅ Redis connected - Async document processing available\n")
+    except Exception as e:
+        error_message = f"⚠️ Redis not available: {e}"
+        
+        if settings.is_production:
+            # PRODUCTION: Redis/Celery REQUIRED - Fail to start
+            logger.error("❌ PRODUCTION ERROR: Redis/Celery is required but not available")
+            print("\n" + "=" * 70)
+            print("❌ FATAL ERROR: Redis/Celery not available in PRODUCTION")
+            print("=" * 70)
+            print("Application cannot start in production without async processing.")
+            print("\nRequired actions:")
+            print("  1. Ensure Redis server is running")
+            print("  2. Verify celery_broker_url in environment variables")
+            print("  3. Start Celery workers before starting the API")
+            print("=" * 70 + "\n")
+            raise RuntimeError("Redis/Celery is required in production environment")
+        else:
+            # DEVELOPMENT: Warn but allow fallback to sync processing
+            logger.warning(error_message)
+            print("\n" + "=" * 70)
+            print("⚠️  DEV MODE WARNING: Redis/Celery not running")
+            print("=" * 70)
+            print("Document ingestion will FALLBACK to SYNCHRONOUS processing (slower).")
+            print("This fallback is ONLY available in development mode.")
+            print("\nTo enable async processing:")
+            print("  1. Install Redis: choco install redis-64 (run as Administrator)")
+            print("  2. Start Redis: redis-server")
+            print("  3. Start Celery worker: python start_celery_worker.py")
+            print("\nCurrent mode: Development (sync fallback enabled)")
+            print("=" * 70 + "\n")
     
     yield
     
     # Shutdown
-    print(">> Shutting down AI Brain application...")
+    logger.info("Shutting down AI Brain application...")
     await engine.dispose()
+    logger.info("Database connections closed")
 
 
 # Create FastAPI application

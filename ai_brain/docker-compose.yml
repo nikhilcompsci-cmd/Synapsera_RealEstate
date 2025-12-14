@@ -1,6 +1,5 @@
-version: '3.8'
-
 services:
+  # PostgreSQL Database
   postgres:
     image: postgres:16-alpine
     container_name: ai_brain_postgres
@@ -20,6 +19,67 @@ services:
     networks:
       - ai_brain_network
 
+  # Redis Cache & Celery Broker
+  redis:
+    image: redis:7-alpine
+    container_name: ai_brain_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ai_brain_network
+
+  # FastAPI Application
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai_brain_app
+    env_file:
+      - environment/.env.docker
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data/documents:/app/data/documents
+      - ./data/faiss_indices:/app/data/faiss_indices
+      - ./logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - ai_brain_network
+    command: python main.py
+
+  # Celery Worker
+  celery_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai_brain_celery_worker
+    env_file:
+      - environment/.env.docker
+    volumes:
+      - ./data/documents:/app/data/documents
+      - ./data/faiss_indices:/app/data/faiss_indices
+      - ./logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - ai_brain_network
+    command: celery -A celery_app worker --loglevel=info --pool=solo
+
+  # Database Admin UI
   adminer:
     image: adminer:latest
     container_name: ai_brain_adminer
@@ -35,6 +95,8 @@ services:
 
 volumes:
   postgres_data:
+    driver: local
+  redis_data:
     driver: local
 
 networks:

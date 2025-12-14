@@ -1,4 +1,4 @@
-from sqlalchemy import String, DateTime, Integer, Text, ForeignKey, func, Index
+from sqlalchemy import String, DateTime, Integer, Text, ForeignKey, func, Index, JSON
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from datetime import datetime
 from typing import Optional, List
@@ -36,6 +36,11 @@ class Project(Base):
         back_populates="project",
         cascade="all, delete-orphan"
     )
+    failed_documents: Mapped[List["FailedDocument"]] = relationship(
+        "FailedDocument",
+        back_populates="project",
+        cascade="all, delete-orphan"
+    )
     
     def __repr__(self) -> str:
         return f"<Project(id={self.id}, name='{self.name}')>"
@@ -57,6 +62,7 @@ class Document(Base):
     # Metadata
     page_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     extracted_text_length: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    validation_metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)  # Validation & extraction metadata
     
     # Status tracking
     status: Mapped[str] = mapped_column(

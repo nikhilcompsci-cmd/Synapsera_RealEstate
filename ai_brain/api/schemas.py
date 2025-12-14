@@ -24,12 +24,13 @@ class ProjectResponse(BaseModel):
 # Document Schemas
 class DocumentUploadResponse(BaseModel):
     """Schema for document upload response."""
-    status: str = Field(..., description="success, duplicate, or error")
+    status: str = Field(..., description="queued, success, duplicate, or error")
     document_id: int | None = Field(None, description="ID of created/existing document")
     message: str
     chunks_created: int
     embeddings_created: int
     page_count: int | None = None
+    task_id: str | None = Field(None, description="Celery task ID for async processing")
 
 
 class DocumentInfo(BaseModel):
@@ -80,4 +81,75 @@ class HealthResponse(BaseModel):
     """Schema for health check response."""
     status: str
     version: str
+    timestamp: datetime
+
+
+# Failed Documents Schemas
+class FailedDocumentResponse(BaseModel):
+    """Schema for failed document response."""
+    id: int
+    project_id: int
+    user_id: int | None
+    filename: str
+    file_size: int | None
+    error_type: str
+    error_message: str  # Sanitized
+    status: str
+    retry_count: int
+    max_retries: int
+    failed_stage: str | None
+    processing_duration: float | None
+    task_id: str | None
+    created_at: datetime
+    last_retry_at: datetime | None
+    next_retry_at: datetime | None
+    resolved_at: datetime | None
+    resolution_notes: str | None
+    
+    model_config = ConfigDict(from_attributes=True)
+
+
+class FailedDocumentListResponse(BaseModel):
+    """Schema for paginated failed documents list."""
+    items: List[FailedDocumentResponse]
+    total_count: int
+    limit: int
+    offset: int
+
+
+class RetryFailedDocumentRequest(BaseModel):
+    """Schema for manual retry request."""
+    retry_delay_seconds: int | None = Field(
+        None,
+        ge=0,
+        le=3600,
+        description="Delay before retry in seconds (0-3600). None = immediate"
+    )
+
+
+class UpdateFailedDocumentRequest(BaseModel):
+    """Schema for updating failed document status."""
+    status: str = Field(..., description="New status: resolved, permanently_failed, or ignored")
+    resolution_notes: str | None = Field(None, max_length=1000, description="Notes about resolution")
+
+
+class FailureMetricsResponse(BaseModel):
+    """Schema for failure metrics response."""
+    total_failures: int
+    by_error_type: dict[str, int]
+    by_status: dict[str, int]
+    avg_retry_count: float
+    success_rate: float
+    time_window_days: int
+
+
+class SystemHealthResponse(BaseModel):
+    """Schema for comprehensive system health check."""
+    status: str = Field(..., description="healthy, degraded, or unhealthy")
+    celery_workers: int
+    redis_connected: bool
+    database_connected: bool
+    failed_tasks_24h: int
+    success_rate_24h: float
+    avg_processing_time_seconds: float | None
     timestamp: datetime

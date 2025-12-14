@@ -4,8 +4,10 @@ from db.session import get_db_session
 from db.repositories.project_repository import ProjectRepository
 from api.schemas import ProjectCreate, ProjectResponse
 from typing import List
+import logging
 
 router = APIRouter(prefix="/project", tags=["Projects"])
+logger = logging.getLogger(__name__)
 
 
 @router.post(
@@ -52,10 +54,13 @@ async def list_projects(
     Retrieve all projects ordered by creation date (newest first).
     """
     try:
+        logger.debug("Fetching all projects")
         repo = ProjectRepository(session)
         projects = await repo.get_all()
+        logger.info(f"Retrieved {len(projects)} projects")
         return [ProjectResponse.model_validate(p) for p in projects]
     except Exception as e:
+        logger.error(f"Failed to fetch projects: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to retrieve projects: {str(e)}"
