@@ -19,7 +19,7 @@ class DocumentRepository:
         content_hash: str,
         page_count: Optional[int] = None,
         extracted_text_length: Optional[int] = None,
-        metadata: Optional[dict] = None
+        validation_metadata: Optional[dict] = None
     ) -> Document:
         """
         Create a new document.
@@ -33,7 +33,7 @@ class DocumentRepository:
             content_hash=content_hash,
             page_count=page_count,
             extracted_text_length=extracted_text_length,
-            metadata=metadata,
+            validation_metadata=validation_metadata,
             status="pending"
         )
         self.session.add(document)

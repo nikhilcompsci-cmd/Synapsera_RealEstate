@@ -62,7 +62,7 @@ class Document(Base):
     # Metadata
     page_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     extracted_text_length: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)  # Validation & extraction metadata
+    validation_metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)  # Validation & extraction metadata
     
     # Status tracking
     status: Mapped[str] = mapped_column(

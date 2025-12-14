@@ -19,10 +19,10 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Add metadata JSON column to documents table
-    op.add_column('documents', sa.Column('metadata', sa.JSON(), nullable=True))
+    # Add validation_metadata JSON column to documents table
+    op.add_column('documents', sa.Column('validation_metadata', sa.JSON(), nullable=True))
 
 
 def downgrade() -> None:
-    # Remove metadata column
-    op.drop_column('documents', 'metadata')
+    # Remove validation_metadata column
+    op.drop_column('documents', 'validation_metadata')
